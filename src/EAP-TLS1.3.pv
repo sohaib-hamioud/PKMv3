@@ -1,0 +1,259 @@
+
+free c: channel.
+(* types *)
+type nonce.      
+type skey.
+type pkey.
+type mackey.
+type symkey.
+type element.
+(* constants *)
+const zero: bitstring.
+const emptybitstring: bitstring.
+const g: element.
+free label_eap_req_identity: bitstring.
+free label_eap_resp_identity: bitstring.
+free label_client_handshake_traffic: bitstring.
+free label_server_handshake_traffic: bitstring.
+free label_client_finished: bitstring.
+free label_server_finished: bitstring.
+free label_msk: bitstring.
+free label_EAP_success: bitstring.
+free negotiated_capabilities: bitstring.
+
+(* functions *)
+fun pk(skey): pkey.
+fun dh_ideal(element,bitstring): element.
+fun h(bitstring): bitstring.
+fun hmac(bitstring,bitstring): bitstring.
+fun hkdf_extract(bitstring, bitstring): bitstring.
+fun hkdf_expand_label(bitstring,bitstring,bitstring): bitstring.
+fun truncate(bitstring,nat): bitstring.
+fun aes_cmac(mackey, bitstring): bitstring.
+fun sign(bitstring, skey): bitstring.
+reduc forall m: bitstring, k: skey; getmessage(sign(m,k))= m. 
+reduc forall m: bitstring, k: skey; checksign(sign(m,k),pk(k))= m.
+
+(* equiations *)
+equation forall x: bitstring, y: bitstring;
+  dh_ideal(dh_ideal(g, x), y) = dh_ideal(dh_ideal(g, y), x).
+
+(* events *)
+event abs_authentication_successful(nonce,nonce).
+event ams_authentication_successful(nonce,nonce).
+event msk_derived_ams(bitstring,nonce,nonce,bitstring).
+event msk_derived_abs(bitstring,nonce,nonce, bitstring).
+
+(* Queries *) 
+
+
+query na, nb: nonce; event(ams_authentication_successful(na,nb)). 
+query na, nb: nonce; 
+inj-event(ams_authentication_successful(na,nb)) ==> inj-event(abs_authentication_successful(na,nb)). 
+query msk, absid: bitstring, na, nb: nonce; event(msk_derived_ams(msk, na, nb, absid)).  
+query msk, absid: bitstring, na, nb: nonce; event (msk_derived_abs(msk, na, nb, absid)). 
+query msk1, msk2, absid: bitstring, na, nb: nonce; 
+event (msk_derived_ams(msk1, na, nb, absid)) && event (msk_derived_abs(msk2, na, nb, absid)) ==> (msk1 = msk2). 
+query msk, absid1, absid2: bitstring, na1, na2, nb1, nb2: nonce; 
+event (msk_derived_ams(msk, na1, nb1, absid1)) && event (msk_derived_abs(msk, na2, nb2, absid2)) ==> (na1 = na2) && (nb1 = nb2) && (absid1 = absid2).
+
+(* Security Assemtions *)
+not attacker (new skAMS).
+not attacker (new skABS).
+
+(* type converter *)
+
+(* Function to convert element to bitstring *)
+fun elt2bitstring(element): bitstring [typeConverter].
+
+(* Function to convert natrual to bitstring *)
+fun nat2bitstring(nat): bitstring [typeConverter].
+
+(* Capabilites and method type *)
+
+free eap_capabilities: bitstring.
+free cipher_suites: bitstring.
+free selected_cipher_suite: bitstring.
+free EAP_type: bitstring.
+
+(* Honest hosts *)
+free honestMID, honestAMSID, honestABSID: bitstring.	
+
+(* Protocol *)
+
+let processAMS(skAMS: skey, AMSCert : bitstring, MCert: bitstring, pkCA: pkey)=
+(* Check MCert *)
+	let (=honestMID, pkM: pkey) = checksign(MCert, pkCA) in
+(* Capability Exchange *)
+	let AAI_SBC_REQ = eap_capabilities in
+	out(c, AAI_SBC_REQ);
+	in(c, AAI_SBC_RSP:bitstring);
+(* EAP Identity Phase *)
+(* Receiving EAP-Request-Identity *)
+	in(c, EAP_Request_Identity: bitstring);
+	let (=label_eap_req_identity) = EAP_Request_Identity in
+	let EAP_Response_Identity = (label_eap_resp_identity, honestAMSID) in
+(* Sending EAP-Response-Identity *)
+	out(c, EAP_Response_Identity);
+(* EAP method selection - establishing EAP type and session *)
+(* Receiving an EAP-Request/EAP-TLS Start *)
+	in (c, EAP_Request: bitstring);
+	let (selected_EAP_type: bitstring) = EAP_Request in
+(* Sending an EAP-Response/ClientHello *)
+	new x: bitstring;
+	new AMS_random: nonce;
+	let gx= dh_ideal(g,x) in
+	let EAP_Response_clienthello= (gx, AMS_random, cipher_suites) in
+	out (c, EAP_Response_clienthello);
+(* Receiving an EAP-Request/ServerHello *)
+	in (c, EAP_Request_serverhello: bitstring); 
+	let (gy: element, ABS_random: nonce, cipher_suite: bitstring) = EAP_Request_serverhello in  
+(* Receiving ABS Certificate *)
+	in(c, ABSCert: bitstring);
+	let (ABSID: bitstring, pkABS: pkey) = checksign(ABSCert, pkM) in 
+(* Receiving CertificateVerify *)
+	in(c, ABS_certificateVerify: bitstring);
+	let expected_transcript_hash= h((EAP_Response_clienthello, EAP_Request_serverhello, ABSCert)) in
+	let transcript_hash= checksign(ABS_certificateVerify, pkABS) in
+	if transcript_hash= expected_transcript_hash then
+(* Deriving handshake traffic secrets *)
+	let early_secret= hkdf_extract(zero,zero) in
+	let shared= dh_ideal(gy, x) in
+	let handshake_secret= hkdf_extract(early_secret, elt2bitstring(shared)) in
+	let client_handshake_traffic_secret= hkdf_expand_label(handshake_secret, label_client_handshake_traffic, transcript_hash) in
+	let server_handshake_traffic_secret= hkdf_expand_label(handshake_secret, label_server_handshake_traffic, transcript_hash) in
+(* Deriving finished keys *)
+	let client_finished_key= hkdf_expand_label(client_handshake_traffic_secret, label_client_finished, emptybitstring) in
+	let server_finished_key= hkdf_expand_label(server_handshake_traffic_secret, label_server_finished, emptybitstring) in
+(* Receiving ServerFinished *)
+	in(c, server_finished: bitstring);
+	let transcript_hash2= h((EAP_Response_clienthello,EAP_Request_serverhello, ABSCert, ABS_certificateVerify)) in
+	let expected_server_finished= hmac(server_finished_key, transcript_hash2) in
+	if expected_server_finished= server_finished then 
+(* Marking authentication success *)
+	event abs_authentication_successful(AMS_random,ABS_random);	
+(* Sending AMS Certificate *)
+	out (c, AMSCert);
+(* Sending certificateVerify *)
+	let transcript_hash3= h((EAP_Response_clienthello,EAP_Request_serverhello, ABSCert, ABS_certificateVerify, server_finished, AMSCert)) in
+	let certificateVerify= sign(transcript_hash3, skAMS) in
+	out(c, certificateVerify);
+(* Sending clientFinished *)
+	let transcript_hash4= h((EAP_Response_clienthello,EAP_Request_serverhello, ABSCert, ABS_certificateVerify, server_finished, AMSCert, 	certificateVerify)) in
+	let client_finished= hmac(client_finished_key, transcript_hash4) in 
+	out(c, client_finished);
+(* MSK derivation *)	
+	let master_secret= hkdf_extract(handshake_secret, zero) in
+	let msk= hkdf_expand_label(master_secret, label_msk, nat2bitstring(64)) in
+	event msk_derived_ams(msk,AMS_random,ABS_random,ABSID);
+(* Receiving EAP Success message *)
+in (c, EAP_success: bitstring).
+
+let processABS(skABS: skey, ABSCert: bitstring, MCert: bitstring, pkCA: pkey)=
+(* Check MCert *)
+	let (=honestMID, pkM: pkey) = checksign(MCert, pkCA) in
+(* Capability Exchange *)	
+	in(c, AAI_SBC_REQ: bitstring);
+	let AAI_SBC_RSP= negotiated_capabilities in
+	out(c, AAI_SBC_RSP);
+(* EAP Identity Phase *)
+(* Sending EAP-Request-Identity *)
+	let EAP_Request_Identity= label_eap_req_identity in
+	out(c, EAP_Request_Identity);
+(* Receiving EAP-Response-Identity *)
+	in(c, EAP_Response_Identity: bitstring);
+	let (=label_eap_resp_identity, AMSID: bitstring)= EAP_Response_Identity in
+(* EAP method selection - establishing EAP type and session *)
+(* Sending an EAP-Request/EAP-TLS Start *)
+	let EAP_Request= EAP_type in
+ 	out (c, EAP_Request);
+(* Receiving an EAP-Response/ClientHello *)
+	in(c, EAP_Response_clienthello: bitstring);
+	let (gx: element, AMS_random: nonce, supported_cipher_suites: bitstring)= EAP_Response_clienthello in
+	new ABS_random: nonce;
+	new y: bitstring;
+	let gy= dh_ideal(g, y) in
+(* Sending an EAP-Request/ServerHello *)
+	let EAP_Request_serverhello= (gy, ABS_random, selected_cipher_suite) in
+	out (c, EAP_Request_serverhello);  
+(* Sending ABS Certificate *)
+	out(c, ABSCert);
+(* Sending CertificateVerify *)
+	let transcript_hash= h((EAP_Response_clienthello, EAP_Request_serverhello, ABSCert)) in
+	let certificateVerify= sign(transcript_hash, skABS) in
+	out(c, certificateVerify);
+(* Deriving Transcript Hash *)
+	let early_secret= hkdf_extract(zero,zero) in
+	let shared= dh_ideal(gx, y) in
+	let handshake_secret= hkdf_extract(early_secret, elt2bitstring(shared)) in
+	let transcript_hash= h((EAP_Response_clienthello, EAP_Request_serverhello, ABSCert)) in
+(* Deriving handshake traffic secrets *)
+	let client_handshake_traffic_secret= hkdf_expand_label(handshake_secret, label_client_handshake_traffic, transcript_hash) in
+	let server_handshake_traffic_secret= hkdf_expand_label(handshake_secret, label_server_handshake_traffic, transcript_hash) in
+(* Deriving finished keys *)
+	let client_finished_key= hkdf_expand_label(client_handshake_traffic_secret, label_client_finished, emptybitstring) in
+	let server_finished_key= hkdf_expand_label(server_handshake_traffic_secret, label_server_finished, emptybitstring) in
+(* Sending serverFinished *)
+	let transcript_hash2= h((EAP_Response_clienthello, EAP_Request_serverhello, ABSCert, certificateVerify)) in	
+	let server_finished= hmac(server_finished_key, transcript_hash2) in
+	out(c, server_finished);	
+(* Receiving AMS Certificate *)
+	in (c, AMSCert: bitstring);
+	let (=AMSID, pkAMS: pkey) = checksign(AMSCert, pkM) in
+(* Receiving CertificateVerify *)
+	in (c, AMS_certificateVerify: bitstring);
+	let transcript_hash3= checksign(AMS_certificateVerify, pkAMS) in
+	let expected_transcript_hash= h((EAP_Response_clienthello, EAP_Request_serverhello, ABSCert, certificateVerify, server_finished, AMSCert)) in
+	if expected_transcript_hash= transcript_hash3 then
+(* Receiving clientFinished *)
+	in(c, client_finished: bitstring);
+	let transcript_hash4= h((EAP_Response_clienthello, EAP_Request_serverhello, ABSCert, certificateVerify, server_finished, AMSCert,  
+   	AMS_certificateVerify)) in
+	let expected_client_finished= hmac(client_finished_key, transcript_hash4) in
+	if expected_client_finished= client_finished then
+(* Marking authentification success *)
+	event ams_authentication_successful(AMS_random,ABS_random);  
+(* MSK derivation *)
+	let master_secret= hkdf_extract(handshake_secret, zero) in
+	let msk= hkdf_expand_label(master_secret, label_msk, nat2bitstring(64)) in	
+	event msk_derived_abs(msk, AMS_random, ABS_random, honestABSID);
+(* Sending EAP Success message *)
+	out (c, label_EAP_success).  
+process
+  (* CA *)
+	new skCA: skey;
+	let pkCA= pk(skCA)
+	in out(c, pkCA);
+  (* Manufacturer *)
+	new skM: skey;
+	let pkM= pk(skM)
+	in let MCert= sign((honestMID,pkM), skCA)
+	in out(c, MCert);
+  (*AMS*)
+	new skAMS: skey;
+	let pkAMS= pk(skAMS) in
+	let AMSCert= sign ((honestAMSID, pkAMS),skM) in	
+	out(c, AMSCert);
+  (*ABS*)
+	new skABS: skey;
+	let pkABS= pk(skABS) in
+	let ABSCert= sign((honestABSID, pkABS), skM) in
+	out(c, ABSCert);
+(*
+(* Allowing attacker to impersonate ABS *)
+ (* Corrupted ABS *)
+	new skCABS: skey;
+	new CABSID: bitstring;
+	let pkCABS= pk(skCABS) in
+	let CABSCert= sign((CABSID, pkCABS), skM) in
+	out (c, (CABSCert, skCABS));
+*)
+(
+	(!processAMS(skAMS, AMSCert, MCert,pkCA)) |
+	(!processABS(skABS, ABSCert, MCert,pkCA)) |
+       	  0
+)	
+
+	
+
+	
