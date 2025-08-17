@@ -1,0 +1,567 @@
+free c: channel.
+(* types *)
+type nonce.      
+type skey.
+type pkey.
+type mackey.
+type symkey.
+
+(* constants *)
+const counter_tek0: bitstring.
+const counter_tek1: bitstring.
+const counter_tek2: bitstring.
+const eks1: bitstring.
+const eks2: bitstring.
+const TEK_refresh_flag1: bitstring.
+const TEK_refresh_flag0: bitstring.
+const wrong_SAID: bitstring.
+free label_ak: bitstring.
+free label_akid: bitstring.
+free label_cmac_key_prekey: bitstring.
+free label_tek: bitstring.
+free security_capabilities: bitstring.
+free negotiated_capabilities: bitstring.
+
+(* functions *)
+fun h(bitstring): bitstring.
+fun hkdf_extract(bitstring, bitstring): bitstring.
+fun hkdf_expand_label(bitstring,bitstring,bitstring): bitstring.
+fun truncate(bitstring,nat): bitstring.
+fun dot16KDF(bitstring, bitstring): bitstring.
+fun aes_cmac(mackey, bitstring): bitstring.
+fun dot16KDF_mac_key_d(bitstring): mackey.
+fun dot16KDF_mac_key_u(bitstring): mackey.
+fun dot16KDF_tek(bitstring, bitstring): symkey.
+fun encrypt(bitstring, symkey): bitstring.
+reduc forall x: bitstring, k: symkey; decrypt(encrypt(x,k), k)= x.
+
+(* events *)
+event abs_prekey_derived(bitstring,bitstring,bitstring). 
+event ams_prekey_derived(bitstring,bitstring,bitstring).
+event msg3_sent(mackey,mackey,nonce,nonce).
+event msg3_received(mackey,mackey,nonce,nonce).
+event tek_request_sent(bitstring).
+event tek_reply_sent(bitstring).
+event tek_request_received(bitstring).
+event tek_reply_received(bitstring).
+event abs_tek_invalid_sent(bitstring).
+event ams_tek_invalid_sent(bitstring).
+event abs_tek_invalid_received(bitstring).
+event ams_tek_invalid_received(bitstring).
+event abs_tek_derived(bitstring,symkey,symkey).
+event ams_tek_derived(bitstring,symkey,symkey).
+event tek_updated(bitstring).
+event secret_sent(bitstring,symkey).
+event tek_decrypted(bitstring,symkey).
+event pmk_sn_expired(bitstring,bitstring).
+event reauth_request_sent(bitstring).
+event reauth_started(bitstring).
+
+(* Queries *) 
+
+query prekey, ak, msk: bitstring; event (ams_prekey_derived(prekey, ak, msk)).
+query prekey, ak, msk: bitstring; event (abs_prekey_derived(prekey, ak, msk)).
+query prekey1, prekey2, ak1, ak2, msk: bitstring; 
+event (ams_prekey_derived(prekey1, ak1, msk)) && event (abs_prekey_derived(prekey2, ak2, msk)) ==> ((prekey1 = prekey2) && (ak1 = ak2)).
+
+query cmac_d1, cmac_u1: mackey, na, nb: nonce; event (msg3_sent(cmac_d1, cmac_u1, nb, na)).
+query cmac_d1, cmac_u1: mackey, na, nb: nonce; event (msg3_received(cmac_d1, cmac_u1, nb, na)).  
+query cmac_d1, cmac_d2, cmac_u1, cmac_u2: mackey, na, nb: nonce; 
+event (msg3_sent(cmac_d1, cmac_u1, nb, na)) &&   event (msg3_received(cmac_d2, cmac_u2, nb, na)) ==> (cmac_d1 = cmac_d2)  &&  (cmac_u1 = cmac_u2). 
+
+query said: bitstring; event(tek_reply_received(said)). 
+query said: bitstring; 
+inj-event(tek_reply_received(said)) ==> inj-event(tek_request_received(said)).		
+
+query said: bitstring; event(tek_request_received(said)).	
+query said: bitstring; 
+inj-event(tek_request_received(said)) ==> inj-event(tek_request_sent(said)).
+query said: bitstring; 
+inj-event(tek_reply_received(said)) ==> inj-event(tek_reply_sent(said)).
+
+query said: bitstring; event (abs_tek_invalid_received(said)).
+query said: bitstring, pn: nat; 
+inj-event (abs_tek_invalid_received(said)) ==> inj-event (abs_tek_invalid_sent(said)).  
+query said: bitstring; event (ams_tek_invalid_sent(said)).
+
+query said: bitstring; 
+inj-event (ams_tek_invalid_received(said)) ==> inj-event (ams_tek_invalid_sent(said)).
+
+query said: bitstring; event(tek_updated(said)).
+query said: bitstring;
+inj-event(tek_updated(said)) ==> inj-event(ams_tek_invalid_received(said)).
+
+query said: bitstring, tek0, tek1: symkey; event (ams_tek_derived(said, tek0, tek1)).
+query said: bitstring, tek0, tek1: symkey; 
+inj-event (ams_tek_derived(said, tek0, tek1)) ==> inj-event (abs_tek_derived(said, tek0, tek1)).
+query pmk_sn, said: bitstring, tek0, tek1: symkey; 
+event (ams_tek_derived(said, tek0, tek1)) && event (abs_tek_derived(said, tek0, tek1)) && event (pmk_sn_expired(said, pmk_sn)).
+
+query said, pmk_sn: bitstring, tek: symkey; event (pmk_sn_expired(said, pmk_sn)).
+query said, pmk_sn: bitstring, tek: symkey; 
+event (pmk_sn_expired(said, pmk_sn)) && event (tek_decrypted(said, tek)).
+
+query tek0, tek1: symkey, said: bitstring; 
+inj-event(abs_tek_derived(said, tek0, tek1)) ==> inj-event(tek_request_received(said)).
+
+query tek0, tek1: symkey, said: bitstring; 
+inj-event(ams_tek_derived(said, tek0, tek1)) ==> inj-event(tek_reply_received(said)).
+
+query said: bitstring, tek0, tek1, tek: symkey; 
+event (tek_decrypted(said, tek)) && event(ams_tek_derived(said, tek0, tek1)) ==> tek = tek0 || tek = tek1.
+
+query said: bitstring, tek: symkey; event (tek_decrypted(said, tek)).
+query said: bitstring, tek: symkey; event (secret_sent(said, tek)).
+query said: bitstring, tek: symkey; 
+inj-event (tek_decrypted(said, tek)) ==> inj-event (secret_sent(said, tek)). 
+
+query said: bitstring; event (reauth_started(said)).
+query said: bitstring;
+inj-event (reauth_started(said)) ==> inj-event (reauth_request_sent(said)).
+
+query said, pmk_sn: bitstring; 
+event (reauth_request_sent(said)) && event (reauth_started(said)) ==> event (pmk_sn_expired(said, pmk_sn)).
+
+query attacker(secretAMS). 
+
+(* Security Assemtions *)
+not attacker(new msk).
+
+(* Data plane communication to protect *)
+free secretAMS, secretABS: bitstring [private].
+
+(* type converter *)
+
+(* Function to convert natrual to bitstring *)
+fun nat2bitstring(nat): bitstring [data, typeConverter].
+
+(* Honest hosts *)
+free honestMID, honestAMSID, honestABSID: bitstring.	
+
+(* Protocol *)
+
+let processAMS(msk: bitstring) = 
+(* Deriving PMK *)
+	let pmk= truncate(msk, 160) in
+(* Deriving AK *)
+	let ak= dot16KDF(pmk, (honestAMSID, honestABSID, label_ak, 160)) in
+        let ams_ak_count:nat= 0 in 
+(* Deriving CMAC_TEK prekey *)
+	let CMAC_TEK_prekey= dot16KDF(ak, (nat2bitstring(ams_ak_count),label_cmac_key_prekey, 160)) in
+	event ams_prekey_derived(CMAC_TEK_prekey,ak,msk);
+(* Leaking the CMAC prekey *)
+(*	out(c, CMAC_TEK_prekey); *)
+(* Deriving CMAC keys *)
+	let cmac_key_u= dot16KDF_mac_key_u(CMAC_TEK_prekey) in
+	let cmac_key_d= dot16KDF_mac_key_d(CMAC_TEK_prekey) in 
+(* event keys_for_testing(cmac_key_u, cmac_key_d); *)
+(* Leaking CMAC keys *) 
+      out(c, (cmac_key_u, cmac_key_d)); 
+(* Receiving Key-Agreement-MSG#1 *)
+	in (c, key_agreement_msg1: bitstring);
+	let (Nonce_ABS: nonce, PMK_SN: bitstring, ABS_akid: bitstring, keylifetime: bitstring, ABS_cmac: bitstring)= key_agreement_msg1 in
+(* Checking the CMAC digest *)
+	let (cmac_pn_d: nat,ABS_cmac_value: bitstring)= ABS_cmac in 
+	let akid= dot16KDF(ak, (PMK_SN, honestAMSID, honestABSID, label_akid, 64)) in
+	let msg1_body= (Nonce_ABS, PMK_SN, ABS_akid, keylifetime) in 
+	let AMS_cmac_input= (ABS_akid, cmac_pn_d, msg1_body) in 
+	let msg1_cmac_value= truncate(aes_cmac(cmac_key_d, AMS_cmac_input), 64) in 
+	if akid = ABS_akid && msg1_cmac_value = ABS_cmac_value && cmac_pn_d=0 then 
+	new Nonce_AMS: nonce; 
+(* Sending Key-Agreement-MSG#2 *)
+(* Caclculating the CMAC digest *)
+	let msg2_body= (Nonce_ABS, Nonce_AMS, akid, PMK_SN, security_capabilities) in
+	let cmac_pn_u: nat= 0 in
+	let AMS_cmac_output= (akid, cmac_pn_u, msg2_body) in
+	let msg2_cmac_value= truncate(aes_cmac(cmac_key_u, AMS_cmac_output), 64) in
+	let AMS_cmac= (cmac_pn_u, msg2_cmac_value) in
+	let key_agreement_msg2= (Nonce_ABS, Nonce_AMS, ABS_akid, PMK_SN, security_capabilities, AMS_cmac) in 
+	out(c, key_agreement_msg2); 
+(* Receiving Key-agreement-MSG#3 *)
+	in (c, key_agreement_msg3: bitstring);
+	let (=Nonce_ABS, =Nonce_AMS, =PMK_SN, SAID: bitstring, abs_security_capabilities:bitstring, ABS_cmac2:bitstring)= key_agreement_msg3 in
+(* Checking the CMAC digest *)
+	let (cmac_pn_d2: nat,ABS_cmac_value2: bitstring)= ABS_cmac2 in
+	let msg3_body= (Nonce_ABS, Nonce_AMS, PMK_SN, SAID, abs_security_capabilities) in
+	let AMS_cmac_input2= (akid, cmac_pn_d2, msg3_body) in
+	let msg3_cmac_value= truncate(aes_cmac(cmac_key_d, AMS_cmac_input2), 64) in
+	if ABS_cmac_value2 = msg3_cmac_value then 
+	if cmac_pn_d2 = 1 then 
+	event msg3_received(cmac_key_d, cmac_key_u, Nonce_ABS, Nonce_AMS);
+(* wrong_said or any other invalid paremeter can be injected to corrupt the TEK messages and explore the else branches *)
+(* Sending a TEK-Request *)
+(* Calculating the CMAC digest *)
+	let tek_req_body= (SAID, PMK_SN, TEK_refresh_flag1) in
+	let AMS_cmac_output2= (akid, cmac_pn_u + 1, tek_req_body) in
+	let tek_req_cmac_value= truncate(aes_cmac(cmac_key_u, AMS_cmac_output2), 64) in
+	let AMS_cmac2= (cmac_pn_u + 1, tek_req_cmac_value) in
+	let TEK_Request= (SAID, PMK_SN, TEK_refresh_flag1, AMS_cmac2) in 
+	event tek_request_sent(SAID);
+  	out(c, TEK_Request);
+(* Receiving a TEK-Reply or TEK-Invalid *)
+	in(c, msg_: bitstring);
+(* Trying to parse a 4 attribute TEK-Reply message  *)
+	   let (received_SAID:bitstring, received_PMK_SN:bitstring, received_counter_tek:bitstring, received_eks: bitstring, ABS_cmac3: bitstring)= msg_ in 
+		( 
+(* Checking the CMAC digest *) 
+                  let (cmac_pn_d3: nat, ABS_cmac_value3: bitstring)= ABS_cmac3 in
+		   let tek_rsp_body= (received_SAID, received_PMK_SN, received_counter_tek, received_eks) in
+		   let AMS_cmac_input3= (akid, cmac_pn_d3, tek_rsp_body) in
+		   let tek_rsp_cmac_value= truncate(aes_cmac(cmac_key_d, AMS_cmac_input3), 64) in 
+		   if  ABS_cmac_value3 = tek_rsp_cmac_value then
+	            if cmac_pn_d3 = 2 then 	    
+		     if received_SAID = SAID && received_PMK_SN= PMK_SN && received_counter_tek= counter_tek1 && received_eks= eks1 then
+		     ( 
+		      event tek_reply_received(SAID);
+(* Deriving TEK *)
+		      let tek0 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek0, label_tek)) in 
+		      let tek1 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek1, label_tek)) in
+		      event ams_tek_derived(SAID, tek0, tek1);
+(* Sending a secret *)
+		      event secret_sent(SAID, tek1);
+		      out(c, encrypt(secretAMS, tek1))	     
+ 		     ) else (  
+(* Sending a TEK-Invalid due to an invalid TEK-Reply *)
+(* Calculating the CMAC digest *)
+	                     let tek_invalid_body= (SAID, PMK_SN) in	     
+			     let AMS_cmac_output3= (akid, cmac_pn_u + 2, tek_invalid_body) in
+			     let tek_invalid_cmac_value= truncate(aes_cmac(cmac_key_u, AMS_cmac_output3), 64) in
+			     let AMS_cmac3= (cmac_pn_u + 2, tek_invalid_cmac_value) in
+			     let TEK_Invalid= (SAID, PMK_SN, AMS_cmac3) in
+			     event ams_tek_invalid_sent(SAID);  
+			     out(c, TEK_Invalid);
+(* Receiving of a second TEK-Reply *)
+			     in(c, TEK_Reply2: bitstring);
+			     let (received_SAID2: bitstring, received_PMK_SN2: bitstring, received_counter_tek2: bitstring, received_eks2: bitstring, ABS_cmac4: bitstring)= TEK_Reply2 in 
+			      (  
+(* Checking the CMAC digest *)
+                 	       let (cmac_pn_d4: nat, ABS_cmac_value4: bitstring)= ABS_cmac4 in 
+		 	       let tek_rsp_body2= (received_SAID2, received_PMK_SN2, received_counter_tek2, received_eks2) in
+		 	       let AMS_cmac_input4= (akid, cmac_pn_d4, tek_rsp_body2) in
+		  	       let tek_rsp_cmac_value2= truncate(aes_cmac(cmac_key_d, AMS_cmac_input4), 64) in
+			       if tek_rsp_cmac_value2= ABS_cmac_value4 then 
+				 if cmac_pn_d4 = 3 then  
+			         if received_SAID2 = SAID && received_PMK_SN2= PMK_SN && received_counter_tek2= counter_tek2 && received_eks2= eks2 then
+		  	         (	
+			          event tek_reply_received(SAID); 
+(* Deriving TEK *)
+ 		 	          let tek1 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek1, label_tek)) in
+			          let tek2 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek2, label_tek)) in
+			          event ams_tek_derived(SAID, tek1, tek2); 
+(* Sending a secret *)
+			       	  event secret_sent(SAID, tek2);  
+				  out(c, encrypt(secretAMS, tek2)) 	
+			          ) else (
+(* Starting reauthentication *)
+				       	 event pmk_sn_expired(SAID, PMK_SN);
+(* Calculating the CMAC digest *)
+	                   	         let Reauth_Request_body= PMK_SN in
+					 
+			   	         let AMS_cmac_output4= (akid, cmac_pn_u+3, Reauth_Request_body) in
+			    	         let Reauth_Request_cmac_value= truncate(aes_cmac(cmac_key_u, AMS_cmac_output4), 64) in
+			    	         let AMS_cmac4= (cmac_pn_u+3, Reauth_Request_cmac_value) in
+			    	         let Reauth_Request= (PMK_SN, AMS_cmac4) in
+				         event reauth_request_sent(SAID);
+			    	         out(c, Reauth_Request)
+
+				         )	
+				)
+
+                       ) 
+         ) else ( 
+(* Trying to parse a 2 attribute TEK-Invalid message *)
+	                       let (=SAID, =PMK_SN, ABS_cmac3: bitstring)= msg_ in 
+(* Checking the CMAC digest *)
+		               let (cmac_pn_d3:nat, ABS_cmac_value3:bitstring)= ABS_cmac3 in
+		 	       let tek_invalid_body= (SAID, PMK_SN) in
+		 	       let AMS_cmac_input3= (akid, cmac_pn_d3, tek_invalid_body) in
+		  	       let tek_invalid_cmac_value= truncate(aes_cmac(cmac_key_d, AMS_cmac_input3), 64) in 
+			       if tek_invalid_cmac_value= ABS_cmac_value3 then 
+			         if cmac_pn_d3 = 2 then 
+	  	    		   				 
+	  	  	          event abs_tek_invalid_received(SAID); 
+(* Sending a second TEK-Request *)	        
+(* Calculating the CMAC digest *)
+			          let tek_req_body2= (SAID, PMK_SN, TEK_refresh_flag1) in
+			          let AMS_cmac_output3= (akid, cmac_pn_u + 2, tek_req_body2) in
+			          let tek_req_cmac_value2= truncate(aes_cmac(cmac_key_u, AMS_cmac_output3), 64) in
+			          let AMS_cmac3= (cmac_pn_u + 2, tek_req_cmac_value2) in
+			          let TEK_Request2= (SAID, PMK_SN, TEK_refresh_flag1, AMS_cmac3) in 
+			          event tek_request_sent(SAID);
+  		                  out(c, TEK_Request2);	
+(* Receiving a TEK-Reply or TEK-Invalid *)
+		                  in(c, msg2: bitstring); 
+(* Trying to parse a 4 attribute TEK-Reply message *)
+			          let (received_SAID: bitstring, received_PMK_SN: bitstring, received_counter_tek: bitstring, received_eks: bitstring, ABS_cmac4: bitstring)= msg2 in 
+			          (  
+(* Checking the CMAC digest *)
+                 	           let (cmac_pn_d4: nat, ABS_cmac_value4: bitstring)= ABS_cmac4 in 
+		 	           let tek_rsp_body= (received_SAID, received_PMK_SN, received_counter_tek, received_eks) in
+		 	           let AMS_cmac_input4= (akid, cmac_pn_d4, tek_rsp_body) in
+		  	           let tek_rsp_cmac_value= truncate(aes_cmac(cmac_key_d, AMS_cmac_input4), 64) in
+			           if tek_rsp_cmac_value= ABS_cmac_value4 then 
+			            if cmac_pn_d4 = 3 then   				   
+			             if received_SAID = SAID && received_PMK_SN= PMK_SN && received_counter_tek= counter_tek1 && received_eks= eks1 then
+		  	             ( 
+			              event tek_reply_received(SAID);
+(* Deriving TEK *)
+		                      let tek0 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek0, label_tek)) in 
+		                      let tek1 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek1, label_tek)) in
+		                      event ams_tek_derived(SAID, tek0, tek1);
+(* Sending a secret *)
+		                      event secret_sent(SAID,tek1); 
+		                      out(c, encrypt(secretAMS,tek1))
+				     ) else (  
+(* Starting reauthentication *)
+				       	     event pmk_sn_expired(SAID, PMK_SN);
+(* Calculating the CMAC digest *)
+	                   	             let Reauth_Request_body= PMK_SN in
+			   	             let AMS_cmac_output4= (akid, cmac_pn_u + 3, Reauth_Request_body) in
+			    	             let Reauth_Request_cmac_value= truncate(aes_cmac(cmac_key_u, AMS_cmac_output4), 64) in
+			    	             let AMS_cmac4= (cmac_pn_u+3, Reauth_Request_cmac_value) in
+			    	             let Reauth_Request= (PMK_SN, AMS_cmac4) in
+				             event reauth_request_sent(SAID); 
+			    	             out(c, Reauth_Request)	
+				            )
+                                   ) else ( 
+(* Trying to parse a second 2 attribute TEK-Invalid *)
+                                           let (=SAID, =PMK_SN, ABS_cmac4: bitstring)= msg2 in 
+(* Checking the CMAC digest *)
+		                           let (cmac_pn_d4: nat, ABS_cmac_value4:bitstring)= ABS_cmac4 in
+		 	                   let tek_invalid_body2= (SAID, PMK_SN) in
+		 	                   let AMS_cmac_input4= (akid, cmac_pn_d4, tek_invalid_body2) in
+		  	                   let tek_invalid_cmac_value2= truncate(aes_cmac(cmac_key_d, AMS_cmac_input4), 64) in 
+			                   if tek_invalid_cmac_value2= ABS_cmac_value4 then 
+			                    if cmac_pn_d4 = 3 then
+			                     event abs_tek_invalid_received(SAID); 
+(* Starting reauthentication *)
+				             event pmk_sn_expired(SAID, PMK_SN);
+(* Calculating the CMAC digest *)
+	                   	             let Reauth_Request_body= PMK_SN in
+			   	             let AMS_cmac_output4= (akid, cmac_pn_u + 3, Reauth_Request_body) in
+			    	             let Reauth_Request_cmac_value= truncate(aes_cmac(cmac_key_u, AMS_cmac_output4), 64) in
+			    	             let AMS_cmac4= (cmac_pn_u + 3, Reauth_Request_cmac_value) in
+			    	             let Reauth_Request= (PMK_SN, AMS_cmac4) in
+				             event reauth_request_sent(SAID); 
+			    	             out(c, Reauth_Request)
+					  )
+		
+   ).
+
+
+
+let processABS(msk: bitstring) =
+ (* Deriving PMK *)
+	let pmk= truncate(msk, 160) in
+	new PMK_SN: bitstring;
+	new keylifetime: bitstring;
+(* Deriving AK *)
+        let ak= dot16KDF(pmk, (honestAMSID, honestABSID, label_ak, 160)) in
+        let akid= dot16KDF(ak, (PMK_SN, honestAMSID, honestABSID, label_akid, 64)) in
+	let abs_ak_count:nat= 0 in
+(* Deriving CMAC_TEK prekey *)
+	let CMAC_TEK_prekey= dot16KDF(ak, (nat2bitstring(abs_ak_count),label_cmac_key_prekey, 160)) in
+	event abs_prekey_derived(CMAC_TEK_prekey,ak,msk);
+(* Deriving CMAC keys *) 
+	let cmac_key_u= dot16KDF_mac_key_u(CMAC_TEK_prekey) in
+	let cmac_key_d= dot16KDF_mac_key_d(CMAC_TEK_prekey) in
+	new Nonce_ABS: nonce; 
+(* Sending Key-Agreement-MSG#1 *)
+(* Calculation the CMAC digest *)
+        let msg1_body= (Nonce_ABS, PMK_SN, akid, keylifetime) in
+	let cmac_pn_d:nat=0 in
+	let ABS_cmac_output= (akid, cmac_pn_d, msg1_body) in
+	let msg1_cmac_value= truncate(aes_cmac(cmac_key_d, ABS_cmac_output), 64) in
+	let ABS_cmac= (cmac_pn_d, msg1_cmac_value) in
+	let key_agreement_msg1= (Nonce_ABS, PMK_SN, akid, keylifetime, ABS_cmac) in
+	out(c, key_agreement_msg1);
+(* Receiving key-Agreement-MSG#2 *)
+	in (c, key_agreement_msg2: bitstring);
+        let (=Nonce_ABS, Nonce_AMS: nonce, =akid, =PMK_SN, ams_security_capabilities: bitstring, AMS_cmac: bitstring)= key_agreement_msg2 in 
+(* Checking the CMAC digest *)
+	let (cmac_pn_u: nat, AMS_cmac_value: bitstring)= AMS_cmac in
+	let msg2_body= (Nonce_ABS, Nonce_AMS, akid, PMK_SN, ams_security_capabilities) in
+	let cmac_input= (akid, cmac_pn_u, msg2_body) in
+	let msg2_cmac_value= truncate(aes_cmac(cmac_key_u, cmac_input), 64) in
+	if msg2_cmac_value= AMS_cmac_value && cmac_pn_u= 0 then 
+(* Sending Key-Agreement-MSG#3 *)
+	new SAID: bitstring;
+(* Calculating the CMAC digest *)
+        let msg3_body= (Nonce_ABS, Nonce_AMS, PMK_SN, SAID, negotiated_capabilities) in
+	let ABS_cmac_output2= (akid, cmac_pn_d + 1, msg3_body) in
+	let ABS_cmac_value2= truncate(aes_cmac(cmac_key_d, ABS_cmac_output2), 64) in
+	let ABS_cmac2= (cmac_pn_d + 1, ABS_cmac_value2) in
+	let key_agreement_msg3= (Nonce_ABS, Nonce_AMS, PMK_SN, SAID, negotiated_capabilities, ABS_cmac2) in 
+	event msg3_sent(cmac_key_d, cmac_key_u, Nonce_ABS, Nonce_AMS);
+	out(c, key_agreement_msg3);
+(* Receiving a TEK-Request *)
+	in(c, TEK_Request: bitstring);
+	let (received_SAID: bitstring, received_PMK_SN: bitstring, received_TEK_refresh_flag: bitstring, AMS_cmac2: bitstring)= TEK_Request in 
+		( 
+(* Checking the CMAC digest *)
+ 		   let (cmac_pn_u2: nat, AMS_cmac_value2: bitstring)= AMS_cmac2 in
+		   let tek_req_body= (received_SAID, received_PMK_SN, received_TEK_refresh_flag) in
+		   let cmac_input2= (akid, cmac_pn_u2, tek_req_body) in
+		   let tek_req_cmac_value= truncate(aes_cmac(cmac_key_u, cmac_input2), 64) in
+		   if tek_req_cmac_value = AMS_cmac_value2 then  
+		    if cmac_pn_u2 = 1 then 
+		    if received_SAID = SAID && received_PMK_SN = PMK_SN && received_TEK_refresh_flag = TEK_refresh_flag1 then
+		    ( event tek_request_received(SAID); 
+(* Deriving TEK *)
+ 		      let tek0 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek0, label_tek)) in 
+		      let tek1 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek1, label_tek)) in
+		      event abs_tek_derived(SAID, tek0, tek1);
+(* Sending a TEK-Reply *)
+(* Calculating the CMAC digest *)
+		      let tek_rsp_body= (SAID, PMK_SN, counter_tek1, eks1) in
+		      let ABS_cmac_output3= (akid, cmac_pn_d + 2, tek_rsp_body) in
+		      let ABS_cmac_value3= truncate(aes_cmac(cmac_key_d, ABS_cmac_output3), 64) in
+		      let ABS_cmac3= (cmac_pn_d + 2, ABS_cmac_value3) in	    
+		      let TEK_Reply= (SAID, PMK_SN, counter_tek1, eks1, ABS_cmac3) in
+		      event tek_reply_sent(SAID);
+		      out(c, TEK_Reply);
+(* Receiving secured data or a TEK-Invalid *)
+	              in(c, msg: bitstring); 
+(* Receiving secured data *)
+		      let s= decrypt(msg, tek1) in 
+		      event tek_decrypted(SAID, tek1)
+		      else ( 
+(* Trying to parse a 2 attribute TEK-Invalid message *)
+		           let (=SAID,=PMK_SN,AMS_cmac3:bitstring)= msg in  
+			        (  
+(* Checking the CMAC digest *)
+ 		                let (cmac_pn_u3:nat, AMS_cmac_value3:bitstring)= AMS_cmac3 in
+		 	        let tek_invalid_body= (SAID, PMK_SN) in
+		  		let cmac_input3= (akid, cmac_pn_u3, tek_invalid_body) in
+		  		let tek_invalid_cmac_value= truncate(aes_cmac(cmac_key_u, cmac_input3), 64) in
+				if tek_invalid_cmac_value= AMS_cmac_value3 then
+		   	         if cmac_pn_u3 = 2 then
+				  event ams_tek_invalid_received(SAID); 
+(* Update Teks *)
+			          let tek2 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek2, label_tek)) in 
+		                  event abs_tek_derived(SAID, tek1, tek2);
+				  event tek_updated(SAID);
+(* Sending of a second TEK_Reply *)
+(* Calculating the CMAC digest *)
+			          let tek_rsp_body2= (SAID, PMK_SN, counter_tek2, eks2) in
+			          let ABS_cmac_output4= (akid, cmac_pn_d + 3, tek_rsp_body2) in
+		 	          let ABS_cmac_value4= truncate(aes_cmac(cmac_key_d, ABS_cmac_output4), 64) in
+		 	          let ABS_cmac4= (cmac_pn_d + 3, ABS_cmac_value4) in 
+		 	          let TEK_Reply2= (SAID, PMK_SN, counter_tek2, eks2,ABS_cmac4) in
+				  event tek_reply_sent(SAID); 
+			          out(c, TEK_Reply2);
+(* Receiving secured data or a Reauth-Request *)
+				  in(c, msg2: bitstring);  
+(* Trying to decrypt a secret *)
+				  let s= decrypt(msg2, tek2) in 
+				  event tek_decrypted(SAID, tek2)
+				  else (
+(* Receiving a Reauth-Request *)
+				        let (=PMK_SN, AMS_cmac4: bitstring)= msg2 in 
+(* Checking the CMAC digest *)
+ 		                        let (cmac_pn_u4: nat, AMS_cmac_value4:bitstring)= AMS_cmac4 in
+		 	                let Reauth_Request_body= PMK_SN in
+		  		        let cmac_input4= (akid, cmac_pn_u4, Reauth_Request_body) in
+		  		        let Reauth_Request_cmac_value= truncate(aes_cmac(cmac_key_u, cmac_input4), 64) in
+				        if Reauth_Request_cmac_value= AMS_cmac_value4 then 
+					if cmac_pn_u4 = 3 then
+				         event reauth_started(SAID)
+				       )
+
+				 )
+		          )
+
+		   ) else (  
+(* Sending a TEK-Invalid due an invalid TEK-Request *)
+(* Calculating the CMAC digest *)
+		 	    let tek_invalid_body= (SAID, PMK_SN) in
+			    let ABS_cmac_output3= (akid, cmac_pn_d + 2, tek_invalid_body) in
+			    let ABS_cmac_value3= truncate(aes_cmac(cmac_key_d, ABS_cmac_output3), 64) in
+			    let ABS_cmac3= (cmac_pn_d + 2, ABS_cmac_value3) in
+			    let TEK_Invalid= (SAID, PMK_SN, ABS_cmac3) in
+		 	    event abs_tek_invalid_sent(SAID);
+		            out(c, TEK_Invalid);
+(* Receiving a second TEK-Request *)
+			    in(c, TEK_Request2: bitstring); 
+			    let (received_SAID2: bitstring, received_PMK_SN2: bitstring,received_TEK_refresh_flag_2: bitstring, AMS_cmac3: bitstring)= TEK_Request2 in 
+		            (
+(* Checking the CMAC digest *)
+ 			     let (cmac_pn_u3: nat, AMS_cmac_value3: bitstring)= AMS_cmac3 in 
+			     let tek_req_body2= (received_SAID2, received_PMK_SN2, received_TEK_refresh_flag_2) in
+		 	     let cmac_input3= (akid, cmac_pn_u3, tek_req_body2) in
+		  	     let tek_req_cmac_value2= truncate(aes_cmac(cmac_key_u, cmac_input3), 64) in
+			     if tek_req_cmac_value2 = AMS_cmac_value3 then 
+			      if cmac_pn_u3 = 2 then
+		               if received_SAID2 = SAID && received_PMK_SN2 = PMK_SN && received_TEK_refresh_flag_2 = TEK_refresh_flag1 then 
+			       ( 
+				 event tek_request_received(SAID);
+(* Deriving TEK *)
+ 		                 let tek0 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek0, label_tek)) in
+		                 let tek1 = dot16KDF_tek (CMAC_TEK_prekey, (SAID, counter_tek1, label_tek)) in
+		                 event abs_tek_derived(SAID, tek0, tek1);
+(* Sending a TEK-Reply *)
+(* Calculating the CMAC digest *)
+				 let tek_rsp_body= (SAID, PMK_SN, counter_tek1, eks1) in
+		                 let ABS_cmac_output4= (akid, cmac_pn_d + 3, tek_rsp_body) in
+		                 let ABS_cmac_value4= truncate(aes_cmac(cmac_key_d, ABS_cmac_output4), 64) in
+		    		 let ABS_cmac4= (cmac_pn_d + 3, ABS_cmac_value4) in	    
+		                 let TEK_Reply= (SAID, PMK_SN, counter_tek1, eks1, ABS_cmac4) in
+		                 event tek_reply_sent(SAID); 
+		                 out(c, TEK_Reply);
+(* Receiving secured data or a Reauth-Request *)
+				 in(c, msg: bitstring); 
+				 let s= decrypt(msg, tek1) in 
+				 event tek_decrypted(SAID, tek1)
+				 else (  
+(* Receiving a Reauth-Request *)
+				       let (=PMK_SN, AMS_cmac4: bitstring)= msg in 
+(* Checking the CMAC digest *)
+ 		                       let (cmac_pn_u4: nat, AMS_cmac_value4:bitstring)= AMS_cmac4 in
+		 	               let Reauth_Request_body= PMK_SN in
+		  		       let cmac_input4= (akid, cmac_pn_u4, Reauth_Request_body) in
+		  		       let Reauth_Request_cmac_value= truncate(aes_cmac(cmac_key_u, cmac_input4), 64) in 
+				       if Reauth_Request_cmac_value= AMS_cmac_value4 then 
+					if cmac_pn_u4 = 3 then
+				         event reauth_started(SAID)
+				       )
+			      ) else (  
+(* Sending a TEK-Invalid due to an invalid second TEK-Request*)
+(* Calculating the CMAC digest *)
+		 	              let tek_invalid_body2= (SAID, PMK_SN) in
+			              let ABS_cmac_output4= (akid, cmac_pn_d + 3, tek_invalid_body2) in
+			              let ABS_cmac_value4= truncate(aes_cmac(cmac_key_d, ABS_cmac_output4), 64) in
+			              let ABS_cmac4= (cmac_pn_d + 3, ABS_cmac_value4) in
+			              let TEK_Invalid2= (SAID, PMK_SN, ABS_cmac4) in
+		 	              event abs_tek_invalid_sent(SAID);	
+		                      out(c, TEK_Invalid2); 
+(* Receiving a Reauth-Request *)
+				      in(c, Reauth_Request: bitstring); 
+				      let (=PMK_SN, AMS_cmac4: bitstring)= Reauth_Request in 
+(* Checking the CMAC digest *)
+ 		                      let (cmac_pn_u4: nat, AMS_cmac_value4: bitstring)= AMS_cmac4 in
+		 	              let Reauth_Request_body2= PMK_SN in
+		  		      let cmac_input4= (akid, cmac_pn_u4, Reauth_Request_body2) in
+		  		      let Reauth_Request_cmac_value2= truncate(aes_cmac(cmac_key_u, cmac_input4), 64) in 
+				      if Reauth_Request_cmac_value2= AMS_cmac_value4 then 
+					if cmac_pn_u4 = 3 then 
+				         event reauth_started(SAID)
+                                     )
+			     
+ 		 )
+)).
+process
+(* 
+    Given that: 1- MSK is obtained from EAP-TLS 1.3
+		2- AMSID and ABSID are authenticated during EAP-TLS 1.3 
+*)
+! (                     
+    new msk: bitstring;   (* Fresh MSK per session *)
+    (
+        processAMS(msk)
+      | processABS(msk)
+    )
+  )
+
+	
+
+	
